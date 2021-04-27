@@ -1,3 +1,5 @@
+from __future__ import print_function
+import sys
 import time
 import random
 import torch
@@ -14,19 +16,28 @@ try:
 except ImportError:
   pass
 
+# Use helper functions from hfta package to convert your operators and optimizors
+from hfta.ops import get_hfta_op_for
+from hfta.optim import get_hfta_optim_for
+
 
 class Net(nn.Module):
 
-  def __init__(self):
+  # When initializing the model, save the number of fused models (B),
+  # and convert the default operators to HFTA version with get_hfta_op_for(<default>, B).
+  def __init__(self, B=0):
     super(Net, self).__init__()
-    self.conv1 = nn.Conv2d(1, 32, 3, 1)
-    self.conv2 = nn.Conv2d(32, 64, 3, 1)
-    self.max_pool2d = nn.MaxPool2d(2)
-    self.fc1 = nn.Linear(9216, 128)
-    self.fc2 = nn.Linear(128, 10)
-    self.dropout1 = nn.Dropout2d(0.25)
-    self.dropout2 = nn.Dropout2d(0.5)
+    self.B = B
+    self.conv1 = get_hfta_op_for(nn.Conv2d, B=B)(1, 32, 3, 1)
+    self.conv2 = get_hfta_op_for(nn.Conv2d, B=B)(32, 64, 3, 1)
+    self.max_pool2d = get_hfta_op_for(nn.MaxPool2d, B=B)(2)
+    self.fc1 = get_hfta_op_for(nn.Linear, B=B)(9216, 128)
+    self.fc2 = get_hfta_op_for(nn.Linear, B=B)(128, 10)
+    self.dropout1 = get_hfta_op_for(nn.Dropout2d, B=B)(0.25)
+    self.dropout2 = get_hfta_op_for(nn.Dropout2d, B=B)(0.5)
 
+  # Minor modifications to the forward pass on special operators.
+  # Check the documentation of each operator for details.
   def forward(self, x):
     x = self.conv1(x)
     x = F.relu(x)
@@ -34,21 +45,45 @@ class Net(nn.Module):
     x = F.relu(x)
     x = self.max_pool2d(x)
     x = self.dropout1(x)
-    x = torch.flatten(x, 1)
+
+    if self.B > 0:
+      x = torch.flatten(x, 2)
+      x = x.transpose(0, 1)
+    else:
+      x = torch.flatten(x, 1)
+
     x = self.fc1(x)
     x = F.relu(x)
     x = self.dropout2(x)
     x = self.fc2(x)
-    output = F.log_softmax(x, dim=1)
+
+    if self.B > 0:
+      output = F.log_softmax(x, dim=2)
+    else:
+      output = F.log_softmax(x, dim=1)
+
     return output
 
-def train(config, model, device, train_loader, optimizer, epoch):
+def train(config, model, device, train_loader, optimizer, epoch, B):
   model.train()
   for batch_idx, (data, target) in enumerate(train_loader):
     data, target = data.to(device), target.to(device)
+
+    # Need to combine multiple batches of input data to feed into the fused model
+    if B > 0:
+      N = target.size(0)
+      data = data.unsqueeze(1).expand(-1, B, -1, -1, -1)
+      target = target.repeat(B)
+
     optimizer.zero_grad()
     output = model(data)
-    loss = F.nll_loss(output, target)
+
+    # Also need to modify the loss function to take consider on fused models
+    if B > 0:
+      loss = B * F.nll_loss(output.view(B * N, -1), target)
+    else:
+      loss = F.nll_loss(output, target)
+
     loss.backward()
     if config["device"] == 'xla':
       xm.optimizer_step(optimizer, barrier=True)
@@ -56,17 +91,13 @@ def train(config, model, device, train_loader, optimizer, epoch):
       optimizer.step()
     if batch_idx % config["log_interval"] == 0:
       print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-          epoch,
-          batch_idx * len(data),
-          len(train_loader.dataset),
-          100. * batch_idx / len(train_loader),
-          loss.item(),
-      ))
+          epoch, batch_idx * len(data), len(train_loader.dataset),
+          100. * batch_idx / len(train_loader), loss.item()))
       if config["dry_run"]:
         break
 
 
-def test(model, device, test_loader):
+def test(model, device, test_loader, B):
   model.eval()
   test_loss = 0
   correct = 0
@@ -74,7 +105,18 @@ def test(model, device, test_loader):
     for data, target in test_loader:
       data, target = data.to(device), target.to(device)
       N = target.size(0)
+
+      # Need to combine multiple batches of input data to feed into the fused model
+      if B > 0:
+        data = data.unsqueeze(1).expand(-1, B, -1, -1, -1)
+        target = target.repeat(B)
+
       output = model(data)
+
+      # Change the shape of the output for summing up the loss
+      if B > 0:
+        output = output.view(B * N, -1)
+
       test_loss += F.nll_loss(output, target,
                               reduction='none').view(-1, N).sum(dim=1)
       pred = output.argmax(dim=1, keepdim=True)
@@ -90,9 +132,9 @@ def test(model, device, test_loader):
       loss_str, correct_str))
 
 def main(config):
-  random.seed(1)
-  np.random.seed(1)
-  torch.manual_seed(1)
+  random.seed(config["seed"])
+  np.random.seed(config["seed"])
+  torch.manual_seed(config["seed"])
 
   device = (torch.device(config["device"])
             if config["device"] in {'cpu', 'cuda'} else xm.xla_device())
@@ -104,6 +146,9 @@ def main(config):
       [transforms.ToTensor(),
        transforms.Normalize((0.1307,), (0.3081,))])
 
+  # Detect the number of fused models from the number of provided LR's
+  B = len(config["lr"]) if config["use_hfta"] else 0
+
   dataset1 = datasets.MNIST('./data',
                             train=True,
                             download=True,
@@ -112,29 +157,37 @@ def main(config):
   train_loader = torch.utils.data.DataLoader(dataset1, **kwargs)
   test_loader = torch.utils.data.DataLoader(dataset2, **kwargs)
 
-  model = Net().to(device)
+  # Create the model and specify the number of fused models (B)
+  model = Net(B).to(device)
 
-  optimizer = optim.Adadelta(
+  print('B={} lr={}'.format(B, config["lr"]), file=sys.stderr)
+
+  # Convert the default optimizor (pytorch Adadelta) to HFTA version with get_hfta_optim_for(<default>, B).
+  optimizer = get_hfta_optim_for(optim.Adadelta, B=B)(
       model.parameters(),
-      lr=config["lr"][0],
+      lr=config["lr"] if B > 0 else config["lr"][0],
   )
 
   start = time.perf_counter()
   for epoch in range(1, config["epochs"] + 1):
     now = time.perf_counter()
-    train(config, model, device, train_loader, optimizer, epoch)
+    train(config, model, device, train_loader, optimizer, epoch, B)
     print('Epoch {} took {} s!'.format(epoch, time.perf_counter() - now))
   end = time.perf_counter()
 
-  test(model, device, test_loader)
+  test(model, device, test_loader, B)
 
   print('All jobs Finished, Each epoch took {} s on average!'.format(
-      (end - start) / config["epochs"]))
+      (end - start) / (max(B, 1) * config["epochs"])))
 
+
+# Enable HFTA, but not fusing models
+# Only 1 model is trained
 config = {
+    "use_hfta": True,
     "device": "cuda",
     "batch_size": 64,
-    "lr": [1.0],
+    "lr": [0.1],
     "gamma": 0.7,
     "epochs": 4,
     "seed": 1,
@@ -142,6 +195,7 @@ config = {
     "dry_run": False,
     "save_model": False,
 }
+
 
 print(config)
 main(config)

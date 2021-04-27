@@ -196,6 +196,20 @@ config = {
     "save_model": False,
 }
 
+# # Enable HFTA and fuse 6 models
+# config = {
+#     "use_hfta": True,
+#     "device": "cuda",
+#     "batch_size": 64,
+#     "lr": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+#     "gamma": 0.7,
+#     "epochs": 4,
+#     "seed": 1,
+#     "log_interval": 500,
+#     "dry_run": False,
+#     "save_model": False,
+# }
+
 
 print(config)
 main(config)

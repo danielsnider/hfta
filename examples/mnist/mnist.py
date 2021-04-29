@@ -1,4 +1,6 @@
 # From https://colab.research.google.com/github/UofT-EcoSystem/hfta/blob/eric/colab-tutorial/docs/HFTA_PyTorch_Tutorial.ipynb#scrollTo=N44NF4HoalOh
+
+
 from __future__ import print_function
 import sys
 import time
@@ -10,35 +12,43 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 
-try:
-  import torch_xla
-  import torch_xla.core.xla_model as xm
-  import torch_xla.debug.metrics as met
-except ImportError:
-  pass
-
-# Use helper functions from hfta package to convert your operators and optimizors
-from hfta.ops import get_hfta_op_for
+# Use utilities from the hfta package to convert your operators and optimizors.
+from hfta.ops import convert_ops
 from hfta.optim import get_hfta_optim_for
 
 
 class Net(nn.Module):
 
-  # When initializing the model, save the number of fused models (B),
-  # and convert the default operators to HFTA version with get_hfta_op_for(<default>, B).
+  # When initializing the model, save the number of models that need to be fused 
+  # (B), and convert the default operators to their HFTA version with 
+  # convert_ops(B, list of operators).
+  # When passing 0 to B, we train the model as it is without enabling HFTA.
   def __init__(self, B=0):
     super(Net, self).__init__()
+    # Convert default operators to their HFTA version.
+    (Conv2d, MaxPool2d, Linear, Dropout2d) = convert_ops(
+        B,
+        nn.Conv2d,
+        nn.MaxPool2d,
+        nn.Linear,
+        nn.Dropout2d,
+    )
+
+    # Define the model with converted operators as if they were unchanged.
     self.B = B
-    self.conv1 = get_hfta_op_for(nn.Conv2d, B=B)(1, 32, 3, 1)
-    self.conv2 = get_hfta_op_for(nn.Conv2d, B=B)(32, 64, 3, 1)
-    self.max_pool2d = get_hfta_op_for(nn.MaxPool2d, B=B)(2)
-    self.fc1 = get_hfta_op_for(nn.Linear, B=B)(9216, 128)
-    self.fc2 = get_hfta_op_for(nn.Linear, B=B)(128, 10)
-    self.dropout1 = get_hfta_op_for(nn.Dropout2d, B=B)(0.25)
-    self.dropout2 = get_hfta_op_for(nn.Dropout2d, B=B)(0.5)
+    self.conv1 = Conv2d(1, 32, 3, 1)
+    self.conv2 = Conv2d(32, 64, 3, 1)
+    self.max_pool2d = MaxPool2d(2)
+    self.fc1 = Linear(9216, 128)
+    self.fc2 = Linear(128, 10)
+    self.dropout1 = Dropout2d(0.25)
+    self.dropout2 = Dropout2d(0.5)
 
   # Minor modifications to the forward pass on special operators.
   # Check the documentation of each operator for details.
+  # Now the shape of x is [batch size, B, 3, 28, 28].
+  # This means that the input images to all B models are concatenated along the 
+  # channel dimension.
   def forward(self, x):
     x = self.conv1(x)
     x = F.relu(x)
@@ -47,23 +57,21 @@ class Net(nn.Module):
     x = self.max_pool2d(x)
     x = self.dropout1(x)
 
+    x = torch.flatten(x, -3)
     if self.B > 0:
-      x = torch.flatten(x, 2)
+      # The output shape from flatten is [batch size, B, features], where
+      # features == channels * height * width from dropout1.
+      # However, fc1 expects the input shape to be [B, batch size, features].
+      # Thus, we need to transpose the first and second dimensions.
       x = x.transpose(0, 1)
-    else:
-      x = torch.flatten(x, 1)
 
     x = self.fc1(x)
     x = F.relu(x)
     x = self.dropout2(x)
     x = self.fc2(x)
-
-    if self.B > 0:
-      output = F.log_softmax(x, dim=2)
-    else:
-      output = F.log_softmax(x, dim=1)
-
+    output = F.log_softmax(x, dim=-1)
     return output
+
 
 def train(config, model, device, train_loader, optimizer, epoch, B):
   """

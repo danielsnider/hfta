@@ -205,6 +205,8 @@ class Conv2d(_ConvNd):
                                  _pair(0), groups, bias, padding_mode, B)
 
   def _conv_forward(self, input, weight):
+    from IPython import embed
+    embed() # drop into an IPython session
     Hin, Win = input.size(3), input.size(4)
     input = input.view(-1, self.B * self.in_channels, Hin, Win)
     weight = weight.view(self.B * self.out_channels,

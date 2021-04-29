@@ -185,11 +185,11 @@ def main(config):
   # number of provided learning rates that need to be tested.
   B = len(config["lr"]) if config["use_hfta"] else 0
 
-  dataset1 = datasets.MNIST('./data',
+  dataset1 = datasets.MNIST('./datasets',
                             train=True,
                             download=True,
                             transform=transform)
-  dataset2 = datasets.MNIST('./data', train=False, transform=transform)
+  dataset2 = datasets.MNIST('./datasets', train=False, transform=transform)
   train_loader = torch.utils.data.DataLoader(dataset1, **kwargs)
   test_loader = torch.utils.data.DataLoader(dataset2, **kwargs)
 

@@ -66,11 +66,23 @@ class Net(nn.Module):
     return output
 
 def train(config, model, device, train_loader, optimizer, epoch, B):
+  """
+  config: a dict defined by users to control the experiment
+          See section: "Train the model"
+  model: class Net defined in the code block above
+  device: torch.device
+  train_loader: torch.utils.data.dataloader.DataLoader
+  optimizer: torch.optim
+  epoch: int
+  B: int, the number of models to be fused. When B == 0, we train the original 
+     model as it is without enabling HFTA.
+  """
   model.train()
   for batch_idx, (data, target) in enumerate(train_loader):
     data, target = data.to(device), target.to(device)
 
-    # Need to combine multiple batches of input data to feed into the fused model
+    # Need to duplicate a single batch of input images into multiple batches to 
+    # feed into the fused model.
     if B > 0:
       N = target.size(0)
       data = data.unsqueeze(1).expand(-1, B, -1, -1, -1)
@@ -79,17 +91,21 @@ def train(config, model, device, train_loader, optimizer, epoch, B):
     optimizer.zero_grad()
     output = model(data)
 
-    # Also need to modify the loss function to take consider on fused models
+    # Also need to modify the loss function to take consideration on the fused 
+    # model.
+    # In the case:
+    #   1) the loss function is reduced by averaging along the batch dimension.
+    #   2) multiple models are horizontally fused via HFTA.
+    # To make sure the mathematically equivalent gradients are derived by 
+    # ".backward()", we need to scale the loss value by B.
+    # You might refer to our paper for why such scaling is needed.
     if B > 0:
       loss = B * F.nll_loss(output.view(B * N, -1), target)
     else:
       loss = F.nll_loss(output, target)
 
     loss.backward()
-    if config["device"] == 'xla':
-      xm.optimizer_step(optimizer, barrier=True)
-    else:
-      optimizer.step()
+    optimizer.step()
     if batch_idx % config["log_interval"] == 0:
       print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
           epoch, batch_idx * len(data), len(train_loader.dataset),
@@ -99,6 +115,13 @@ def train(config, model, device, train_loader, optimizer, epoch, B):
 
 
 def test(model, device, test_loader, B):
+  """
+  model: class Net defined in the code block above
+  device: torch.device
+  test_loader: torch.utils.data.dataloader.DataLoader
+  B: int, the number of models to be fused. When B == 0, we test the original 
+     model as it is without enabling HFTA.
+  """
   model.eval()
   test_loss = 0
   correct = 0
@@ -107,14 +130,15 @@ def test(model, device, test_loader, B):
       data, target = data.to(device), target.to(device)
       N = target.size(0)
 
-      # Need to combine multiple batches of input data to feed into the fused model
+      # Need to duplicate a single batch of input images into multiple batches 
+      # to feed into the fused model.
       if B > 0:
         data = data.unsqueeze(1).expand(-1, B, -1, -1, -1)
         target = target.repeat(B)
 
       output = model(data)
 
-      # Change the shape of the output for summing up the loss
+      # Change the shape of the output to align with the loss function.
       if B > 0:
         output = output.view(B * N, -1)
 
@@ -133,12 +157,14 @@ def test(model, device, test_loader, B):
       loss_str, correct_str))
 
 def main(config):
+  """
+  config: a dict defined by users to control the experiment
+  """
   random.seed(config["seed"])
   np.random.seed(config["seed"])
   torch.manual_seed(config["seed"])
 
-  device = (torch.device(config["device"])
-            if config["device"] in {'cpu', 'cuda'} else xm.xla_device())
+  device = torch.device(config["device"])
 
   kwargs = {'batch_size': config["batch_size"]}
   kwargs.update({'num_workers': 1, 'pin_memory': True, 'shuffle': True},)
@@ -147,7 +173,8 @@ def main(config):
       [transforms.ToTensor(),
        transforms.Normalize((0.1307,), (0.3081,))])
 
-  # Detect the number of fused models from the number of provided LR's
+  # Determine the number of models that are horizontally fused together from the 
+  # number of provided learning rates that need to be tested.
   B = len(config["lr"]) if config["use_hfta"] else 0
 
   dataset1 = datasets.MNIST('./data',
@@ -158,12 +185,14 @@ def main(config):
   train_loader = torch.utils.data.DataLoader(dataset1, **kwargs)
   test_loader = torch.utils.data.DataLoader(dataset2, **kwargs)
 
-  # Create the model and specify the number of fused models (B)
+  # Specify the number of models that need to be fused horizontally together (B)
+  # and create the fused model.
   model = Net(B).to(device)
 
   print('B={} lr={}'.format(B, config["lr"]), file=sys.stderr)
 
-  # Convert the default optimizor (pytorch Adadelta) to HFTA version with get_hfta_optim_for(<default>, B).
+  # Convert the default optimizor (PyTorch Adadelta) to its HFTA version with 
+  # get_hfta_optim_for(<default>, B).
   optimizer = get_hfta_optim_for(optim.Adadelta, B=B)(
       model.parameters(),
       lr=config["lr"] if B > 0 else config["lr"][0],
@@ -180,7 +209,6 @@ def main(config):
 
   print('All jobs Finished, Each epoch took {} s on average!'.format(
       (end - start) / (max(B, 1) * config["epochs"])))
-
 
 # Enable HFTA, but not fusing models
 # Only 1 model is trained

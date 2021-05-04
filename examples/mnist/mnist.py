@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 
-# Use utilities from the hfta package to convert your operators and optimizors.
+import sys; sys.path.insert(0, "/home/dans/hfta") # for dev testing only
 from hfta.ops import convert_ops
 from hfta.optim import get_hfta_optim_for
 
@@ -206,6 +206,12 @@ def main(config):
       lr=config["lr"] if B > 0 else config["lr"][0],
   )
 
+  # from IPython import embed
+  # embed() # drop into an IPython session
+  params = list(model.parameters())
+  from pprint import pprint
+  pprint([p.shape for p in params])
+
   start = time.perf_counter()
   for epoch in range(1, config["epochs"] + 1):
     now = time.perf_counter()
@@ -238,6 +244,7 @@ config = {
     "use_hfta": True,
     "device": "cuda",
     "batch_size": 64,
+    # "lr": [0.1],
     "lr": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
     "gamma": 0.7,
     "epochs": 4,

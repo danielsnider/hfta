@@ -1,4 +1,6 @@
+import sys
 import math
+import traceback
 
 import torch
 import torch.nn as nn
@@ -205,10 +207,30 @@ class Conv2d(_ConvNd):
                                  _pair(0), groups, bias, padding_mode, B)
 
   def _conv_forward(self, input, weight):
-    from IPython import embed
-    embed() # drop into an IPython session
+    # callstack = traceback.format_stack()
+    # is_conv1_call = any([l for l in callstack if 'self.conv1(' in l])
+    # if is_conv1_call:
+    #   print('\nCONV SHAPE:', list(input.shape))
+    #   relevant_lines = ["%spy: %s" %( l.split('py", line')[0].strip('  File "/home/dans/stable-baselines3/stable_baselines3'), l.split(', in ')[1].strip('\n').replace('\n','()')) for l in callstack if 'stable_baselines3' in l and ', in ' in l]
+    #   print("\n".join(relevant_lines))
+
+    # from IPython import embed
+    # embed() # drop into an IPython session
+
     Hin, Win = input.size(3), input.size(4)
-    input = input.view(-1, self.B * self.in_channels, Hin, Win)
+    try:
+
+      input = input.view(-1, self.B * self.in_channels, Hin, Win)
+    except Exception as e:
+      if 'Use .reshape(...) instead' in e.__str__():
+        # line_info = sys._getframe().f_back.f_lineno
+        # print('WARNING(conv.py:%s): %s %s' % (line_info, e.__class__, e.__str__()))
+        input = input.reshape(-1, self.B * self.in_channels, Hin, Win)
+      else:
+        # from IPython import embed
+        # embed() # drop into an IPython session
+        raise e
+
     weight = weight.view(self.B * self.out_channels,
                          self.in_channels // self.groups, *self.kernel_size)
     bias = (self.bias.view(self.B * self.out_channels)

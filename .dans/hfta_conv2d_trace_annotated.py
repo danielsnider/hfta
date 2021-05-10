@@ -52,4 +52,5 @@ Summary:
 - Input concatenate on B * n_in_channels
 - Weight concatenate on B * n_out_channels
 - Bias concatenate on B * n_out_channels
+- Convolution with B groups
 - Output concatenated B * n_out_channels, so split those into separate dimensions, then return that

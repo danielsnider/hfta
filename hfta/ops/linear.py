@@ -1,3 +1,4 @@
+import traceback
 import math
 
 import torch
@@ -32,6 +33,11 @@ class Linear(nn.Module):
         nn.init.uniform_(self.bias[b], -bound, bound)
 
   def forward(self, x):
+    # callstack = traceback.format_stack()
+    # print('\nLINEAR SHAPE:', list(x.shape))
+    # relevant_lines = ["%spy: %s" %( l.split('py", line')[0].strip('  File "/home/dans/stable-baselines3/stable_baselines3'), l.split(', in ')[1].strip('\n').replace('\n','()')) for l in callstack if 'stable_baselines3' in l and ', in ' in l]
+    # print("\n".join(relevant_lines))
+
     old_shape = list(x.size())
     x = x.view(old_shape[0], -1, old_shape[-1])
     if self.bias is None:

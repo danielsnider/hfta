@@ -30,3 +30,10 @@ params = list(model.parameters())
  torch.Size([128]),
  torch.Size([10, 128]),
  torch.Size([10])]
+
+
+     Hin, Win = input.size(-2), input.size(-1)
+    if len(input.shape) == 4:
+      input = input.reshape(-1,Hin, Win)
+      input = input.unsqueeze(0)
+      # print('WARNING: added dim')

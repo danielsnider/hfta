@@ -218,18 +218,19 @@ class Conv2d(_ConvNd):
     # embed() # drop into an IPython session
 
     Hin, Win = input.size(3), input.size(4)
-    try:
+    input = input.view(-1, self.B * self.in_channels, Hin, Win)
+    # try:
 
-      input = input.view(-1, self.B * self.in_channels, Hin, Win)
-    except Exception as e:
-      if 'Use .reshape(...) instead' in e.__str__():
-        # line_info = sys._getframe().f_back.f_lineno
-        # print('WARNING(conv.py:%s): %s %s' % (line_info, e.__class__, e.__str__()))
-        input = input.reshape(-1, self.B * self.in_channels, Hin, Win)
-      else:
-        # from IPython import embed
-        # embed() # drop into an IPython session
-        raise e
+    #   input = input.view(-1, self.B * self.in_channels, Hin, Win)
+    # except Exception as e:
+    #   if 'Use .reshape(...) instead' in e.__str__():
+    #     # line_info = sys._getframe().f_back.f_lineno
+    #     # print('WARNING(conv.py:%s): %s %s' % (line_info, e.__class__, e.__str__()))
+    #     input = input.reshape(-1, self.B * self.in_channels, Hin, Win)
+    #   else:
+    #     # from IPython import embed
+    #     # embed() # drop into an IPython session
+    #     raise e
 
     weight = weight.view(self.B * self.out_channels,
                          self.in_channels // self.groups, *self.kernel_size)

@@ -5,7 +5,7 @@ import pandas as pd
 import random
 import time
 import torch
-import torch.cuda.amp as amp
+import torch.cuda.amp as amp # TODO should I enable amp (automatic mixed precision)?
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, transforms
@@ -161,7 +161,7 @@ def attach_args(
       default=False,
       action='store_true',
       help='go over the training and validation loops without performing '
-      'forward and backward passes',
+      'forward and backward passes', # TODO Why warm up loading all data?
   )
   return parser
 
@@ -184,7 +184,7 @@ def _mkdir_outf(args):
 def _create_device_handle(args):
   if args.device == 'cuda':
     assert torch.cuda.is_available()
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = True # TODO use this to cuDNN heuristics
     print('Enable cuDNN heuristics!')
   return (torch.device(args.device)
           if args.device in {'cpu', 'cuda'} else xm.xla_device())
@@ -279,7 +279,7 @@ def train(args, model, criterion, optimizer, scaler, device, train_loader,
     inputs, labels = inputs.to(device), labels.to(device)
     batch_size = inputs.size(0)
     if B > 0:
-      inputs = inputs.unsqueeze(1).expand(-1, B, -1, -1, -1).contiguous()
+      inputs = inputs.unsqueeze(1).expand(-1, B, -1, -1, -1).contiguous() # TODO does this add a lot of runtime? can this be avoided?
       labels = labels.repeat(B)
 
     if args.device == 'cuda':
@@ -359,7 +359,7 @@ def main(args):
 
   _mkdir_outf(args)
 
-  device = _create_device_handle(args)
+  device = _create_device_handle(args) #TODO inspect this device
 
   scaler = _create_scaler(args)
 

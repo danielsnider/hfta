@@ -104,8 +104,9 @@ class DcgmMonitor:
 def dcgm_monitor_thread(monitor, outdir):
   while not monitor.to_shutdown:
     monitor.sample_metrics()
-    time.sleep(9)
+    time.sleep(1)
   monitor.save(outdir)
+  return monitor.metrics
 
 
 def dcgm_monitor_start(monitor, outdir):
@@ -122,8 +123,10 @@ def dcgm_monitor_start(monitor, outdir):
 def dcgm_monitor_stop(monitor, thread):
   monitor.to_shutdown = True
   thread.join()
+  metrics = monitor.metrics
   monitor.reset()
   run_command('nv-hostengine -t')
+  return metrics
 
 
 def _attach_args(

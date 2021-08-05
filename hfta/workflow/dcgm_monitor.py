@@ -82,6 +82,7 @@ class DcgmMonitor:
     self.metrics['host_mem_available'].append(mem.available)
     self.metrics['timestamp'].append(time.time())
     dcgmi_out = run_command('dcgmi dmon -e {} -c 5'.format(self.field_ids_str))
+    # "-c 5" will take 5 samples of the requested metrics every second (default delay).
     dcgmi_samples = {f: [] for f in self.fields}
     for line in dcgmi_out.split('\n')[-4:-1]:
       # THIS ASSUMES THAT THE OUTPUT OF DCGM MONITOR HAS THE FORMAT GPU X METRIC1 METRIC2 ...
@@ -94,6 +95,7 @@ class DcgmMonitor:
         self.metrics[f].append(sum(vals) / len(vals))
       else:
         self.metrics[f].append(float('nan'))
+    return self.metrics
 
   def save(self, output_dir, filename='dcgm_metrics.csv'):
     csv_path = os.path.join(output_dir, filename)

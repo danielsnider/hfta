@@ -11,6 +11,7 @@ def run_command(cmd, input=None):
   stdout = subprocess.check_output(
       cmd.split(),
       universal_newlines=True,
+      stderr=subprocess.STDOUT,
       input=input,
   )
   return stdout

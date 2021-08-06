@@ -112,7 +112,6 @@ def dcgm_monitor_thread(monitor, outdir):
 
 
 def dcgm_monitor_start(monitor, outdir):
-  run_command('nv-hostengine')
   t = threading.Thread(
       target=dcgm_monitor_thread,
       name='DCGM Monitor Thread',
@@ -127,7 +126,6 @@ def dcgm_monitor_stop(monitor, thread):
   thread.join()
   metrics = monitor.metrics
   monitor.reset()
-  run_command('nv-hostengine -t')
   return metrics
 
 
